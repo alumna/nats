@@ -1,0 +1,18 @@
+name: alumna-nats
+version: 0.1.0
+
+dependencies:
+  alumna:
+    github: alumna/backend
+    version: ~> 0.9.0
+  nats:
+    github: jgaskins/nats
+    # shard.yml version 1.7.0 on main; GitHub has no v1.7.0 tag yet
+    commit: 954c7152af6dce1f5aef33583b308bd6f856d04b
+
+authors:
+  - Paulo Coghi <paulo@airsailer.io>
+
+crystal: '>= 1.20.2'
+
+license: MIT

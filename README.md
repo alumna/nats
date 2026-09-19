@@ -1,0 +1,280 @@
+# Alumna NATS
+
+[![Crystal CI](https://github.com/alumna/nats/actions/workflows/ci.yml/badge.svg)](https://github.com/alumna/nats/actions/workflows/ci.yml) ![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Falumna%2Fnats%2Frefs%2Fheads%2Fmaster%2Fshard.yml&query=version&prefix=v&label=version) ![GitHub License](https://img.shields.io/github/license/alumna/nats)
+
+NATS for the [Alumna Backend Framework](https://github.com/alumna/backend).
+
+`Alumna::Nats` holds one NATS client for the process. Use it to:
+
+- publish and subscribe across processes
+- run competing workers on a core queue group (no persist)
+- run a durable job queue on JetStream workqueue (ack)
+
+This shard is not a Service adapter. It does not import HTTP WebSocket. Combine NATS and local Connections in the application if you need browser push.
+
+See [ROADMAP.md](ROADMAP.md).
+
+| If you need | Use |
+|---|---|
+| Every live subscriber gets a copy. No store. | `subscribe` with no queue group |
+| One worker in a group gets each message. No store. | `subscribe` with `queue_group:` |
+| A job waits for a worker. The first ack removes it. | JetStream stream with `retention: :workqueue` |
+| Stored copies for independent consumers | JetStream `:limits` or `:interest`. Do not use `:workqueue`. |
+
+---
+
+## Table of Contents
+1. [Installation](#1-installation)
+2. [Connect](#2-connect)
+3. [Publish and subscribe](#3-publish-and-subscribe)
+4. [Queue groups](#4-queue-groups)
+5. [JetStream jobs](#5-jetstream-jobs)
+6. [Errors](#6-errors)
+7. [Security](#7-security)
+8. [Testing](#8-testing)
+9. [License](#9-license)
+
+---
+
+## 1. Installation
+
+Add it to your `shard.yml`:
+
+```yaml
+dependencies:
+  alumna:
+    github: alumna/backend
+    version: ~> 0.9.0
+  alumna-nats:
+    github: alumna/nats
+```
+
+Then run `shards install`.
+
+Needs Alumna Backend **0.9** or later.
+
+Install a NATS server. The default URL is `nats://127.0.0.1:4222`. Core publish and subscribe need that server.
+
+JetStream jobs need JetStream on the server. Start the server with `nats-server -js`, or set `jetstream {}` in the server config.
+
+For a local unpublished backend clone, use gitignored `shard.override.yml`:
+
+```yaml
+dependencies:
+  alumna:
+    path: ../backend
+```
+
+---
+
+## 2. Connect
+
+```crystal
+require "alumna-nats"
+
+nats = Alumna::Nats.new(URI.parse(ENV["NATS_URL"]))
+if nats.is_a?(Alumna::Nats::Error)
+  # Handle the connect failure. The message has no URI userinfo.
+else
+  nats.ping
+  nats.flush
+  nats.close
+end
+```
+
+`Alumna::Nats.new` accepts a `URI`, a URL string, or an array of servers. `from_uri` is the same as `new` with one URI or string.
+
+```crystal
+nats = Alumna::Nats.new("nats://127.0.0.1:4222")
+nats = Alumna::Nats.from_uri(URI.parse(ENV["NATS_URL"]))
+nats = Alumna::Nats.new([
+  "nats://127.0.0.1:4222",
+  "nats://127.0.0.1:4223",
+])
+```
+
+Optional `nkeys_file` and `user_credentials` go to the driver:
+
+```crystal
+nats = Alumna::Nats.new(
+  URI.parse(ENV["NATS_URL"]),
+  nkeys_file: "user.nk",
+  user_credentials: "user.creds",
+)
+```
+
+| Scheme | Transport |
+|---|---|
+| `nats://` | TCP |
+| `tls://` | TLS |
+
+User and password in the URI are NATS AUTH. A bad scheme or an empty server list raises `ArgumentError`. There is no Unix socket.
+
+From the environment (default `NATS_URL`):
+
+```crystal
+nats = Alumna::Nats.from_env
+# or:
+nats = Alumna::Nats.from_env("NATS_URL")
+```
+
+Use one `Alumna::Nats` per process. Do not open a client per request.
+
+---
+
+## 3. Publish and subscribe
+
+The application owns the subject name. There is no required prefix. Payload is `String` or `Bytes`.
+
+```crystal
+sub = nats.subscribe("orders.created") do |msg|
+  body = String.new(msg.body)
+end
+if sub.is_a?(Alumna::Nats::Error)
+  # Handle the subscribe failure.
+else
+  nats.publish("orders.created", %({"id":1}))
+  nats.flush
+  nats.unsubscribe(sub)
+end
+```
+
+`subscribe` does not block. It returns `Alumna::Nats::Subscription` or `Alumna::Nats::Error`. Pass the handle to `unsubscribe`.
+
+`msg.body` is a view. Copy the bytes if you keep them after the handler returns.
+
+Each current subscriber on a subject gets a copy of the message. If no subscriber is connected, the server does not keep the message. This is not a durable job queue.
+
+Subscribe may use NATS wildcards: `*` for one token, `>` for the rest. Publish must use a concrete subject.
+
+`publish` writes to a buffer. Call `flush` when the process must send the data now. `close` also flushes.
+
+Empty subject raises `ArgumentError`. A subject with a space, a NUL byte, or (on publish) `*` or `>` also raises `ArgumentError`.
+
+Core `nats.publish` does not use JetStream. Core publish does not create a stream.
+
+---
+
+## 4. Queue groups
+
+A queue group makes subscribers compete. Each message goes to one subscriber in the group. Core NATS does not store the message. This is still not a durable job queue.
+
+```crystal
+sub = nats.subscribe("jobs.email", queue_group: "workers") do |msg|
+  body = String.new(msg.body)
+end
+```
+
+Two queue groups on the same subject each get a copy. Workers inside one group compete.
+
+`Subscription.queue_group` is the group name, or `nil` when the subscribe has no group.
+
+Empty queue group raises `ArgumentError`.
+
+---
+
+## 5. JetStream jobs
+
+You must create a stream. Publish does not create a stream.
+
+You must create a durable push consumer. Subscribe does not create a consumer. The handler does not ack.
+
+For a job queue, pass `retention: :workqueue`. The default retention is `:limits`.
+
+`:workqueue` is the job queue. The first ack removes the message. One durable consumer (and its deliver group) receives each message. A second consumer on the same interest returns `Alumna::Nats::Error`. Two workers on that consumer compete.
+
+Do not use `:workqueue` for stored copies to many independent consumers. Use `:limits` or `:interest`.
+
+```crystal
+js = nats.jetstream
+
+stream = js.create_stream("jobs", ["jobs.email"], storage: :file, retention: :workqueue)
+if stream.is_a?(Alumna::Nats::Error)
+  # Handle the create failure.
+else
+  consumer = js.create_consumer("jobs", "workers", ack_wait: 5.seconds)
+  if consumer.is_a?(Alumna::Nats::Error)
+    # Handle the create failure.
+  else
+    sub = js.subscribe(consumer) do |msg|
+      body = String.new(msg.body)
+      js.ack(msg)
+      # or: js.nack(msg)
+      # or: js.nack(msg, delay: 1.second)
+    end
+    ack = js.publish("jobs.email", %({"to":"a@example.com"}))
+    nats.flush
+    js.unsubscribe(sub)
+    js.delete_consumer("jobs", "workers")
+    js.delete_stream("jobs")
+  end
+end
+```
+
+`create_stream` returns `Alumna::Nats::JetStream::Stream` or `Alumna::Nats::Error`. If the stream already exists with the same name, `create_stream` returns that stream. Two streams must not share a subject.
+
+`stream_info` returns the stream, `nil` if the stream does not exist, or `Alumna::Nats::Error`. `delete_stream` removes the stream. If the stream does not exist, `delete_stream` is a no-op.
+
+`js.publish` stores the message in a stream that already listens on that subject. If no stream listens, the call returns `Alumna::Nats::Error`. The process stays up. The shard does not create a stream.
+
+Default storage is file. Pass `storage: :memory` for an in-memory stream. Optional `retention:` is `:limits` (default), `:interest`, or `:workqueue`.
+
+`:limits` keeps the message until size or age limits. Independent consumers can each receive a copy. `:interest` keeps a message while a consumer is interested. If no consumer exists at publish time, `:interest` does not keep the message.
+
+`create_consumer` returns `Alumna::Nats::JetStream::Consumer` or `Alumna::Nats::Error`. The consumer is durable. Ack policy is explicit. Deliver policy is all: a consumer created after publish still receives stored messages. Default deliver group is the consumer name, so workers on that consumer compete. Default deliver subject is generated from the stream name and the consumer name. You may pass `deliver_subject`, `deliver_group`, `filter_subject`, or `ack_wait`. `ack_wait` is how long an unacked message waits before the server delivers it again. On a workqueue stream, create one consumer per interest. Extra overlapping consumers return `Alumna::Nats::Error`.
+
+`consumer_info` returns the consumer, `nil` if the consumer does not exist, or `Alumna::Nats::Error`. `delete_consumer` removes the consumer. If the consumer does not exist, `delete_consumer` is a no-op.
+
+`js.subscribe` does not block. It returns `Alumna::Nats::Subscription` or `Alumna::Nats::Error`. It does not create a consumer. It does not ack when the handler returns. You call `ack` or `nack`. `nack` with `delay:` waits before the next delivery. `msg.body` is a view. Copy the bytes if you keep them after the handler returns.
+
+This product uses push consumers. A consumer without a deliver subject raises `ArgumentError`.
+
+Stream names must not be empty and must not contain `.`. A stream must have at least one subject. Empty stream name, empty subject list, or empty subject raises `ArgumentError`. Empty consumer name or a name with `.` raises `ArgumentError`. Empty deliver subject, empty deliver group, or empty filter subject raises `ArgumentError`. Empty JetStream ack subject raises `ArgumentError`. A nack delay that is not greater than zero raises `ArgumentError`. An ack wait that is not greater than zero raises `ArgumentError`.
+
+`ack` and `nack` write to a buffer. Call `flush` when the process must send the data now.
+
+---
+
+## 6. Errors
+
+Operation results use the struct `Alumna::Nats::Error`. The message never includes URI userinfo (user and password).
+
+`new`, `from_uri`, and `from_env` return `Alumna::Nats | Alumna::Nats::Error`. `subscribe` returns `Alumna::Nats::Subscription | Alumna::Nats::Error`. `create_stream` returns `Alumna::Nats::JetStream::Stream | Alumna::Nats::Error`. `stream_info` returns `Alumna::Nats::JetStream::Stream | Nil | Alumna::Nats::Error`. `js.publish` returns `Alumna::Nats::JetStream::PubAck | Alumna::Nats::Error`. `create_consumer` returns `Alumna::Nats::JetStream::Consumer | Alumna::Nats::Error`. `consumer_info` returns `Alumna::Nats::JetStream::Consumer | Nil | Alumna::Nats::Error`. `js.subscribe` returns `Alumna::Nats::Subscription | Alumna::Nats::Error`. `publish`, `unsubscribe`, `delete_stream`, `delete_consumer`, `ack`, `nack`, `ping`, `flush`, and `close` return `Nil | Alumna::Nats::Error`.
+
+Programmer and config mistakes raise `ArgumentError` (empty URL, bad scheme, missing environment variable, empty or invalid subject, empty queue group, empty stream name, stream name with `.`, empty stream subjects, empty consumer name, consumer name with `.`, empty deliver subject, empty deliver group, empty filter subject, empty JetStream ack subject, nack delay not greater than zero, ack wait not greater than zero, pull consumer on subscribe).
+
+---
+
+## 7. Security
+
+- Do not log the NATS URI. It may contain a password.
+- `Alumna::Nats::Error` strips `//user:pass@` from messages.
+- Put the URI in `NATS_URL`. Do not commit a password.
+- Do not commit `nkeys_file` or `user_credentials` files.
+- Use `tls://` when the link is not trusted.
+- Use one client per process.
+
+---
+
+## 8. Testing
+
+Specs need a NATS server. Set `NATS_URL` or use `nats://127.0.0.1:4222`. JetStream examples need JetStream on that server. If NATS is down, the spec process stops with a clear message.
+
+```bash
+crystal spec
+crystal spec -Dpreview_mt -Dexecution_context
+```
+
+GitHub Actions:
+
+- Format check (`lint`)
+- Specs against one NATS 2.10 server with JetStream on port **4222** (`test`)
+- kcov on `src/` (line-rate 1.000) against that server (`coverage`)
+
+`preview_mt` + `execution_context` runs on the spec jobs.
+
+---
+
+## 9. License
+
+MIT
