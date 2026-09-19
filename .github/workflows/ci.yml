@@ -36,7 +36,7 @@ jobs:
         image: nats:2.10-alpine
         ports:
           - 4222:4222
-        command: ["nats-server", "-js", "-m", "8222", "-sd", "/tmp"]
+        command: nats-server -js -m 8222 -sd /tmp
         options: >-
           --health-cmd "wget -qO- http://127.0.0.1:8222/healthz || exit 1"
           --health-interval 10s
@@ -72,7 +72,7 @@ jobs:
         image: nats:2.10-alpine
         ports:
           - 4222:4222
-        command: ["nats-server", "-js", "-m", "8222", "-sd", "/tmp"]
+        command: nats-server -js -m 8222 -sd /tmp
         options: >-
           --health-cmd "wget -qO- http://127.0.0.1:8222/healthz || exit 1"
           --health-interval 10s
