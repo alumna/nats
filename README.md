@@ -10,7 +10,7 @@ NATS for the [Alumna Backend Framework](https://github.com/alumna/backend).
 - run competing workers on a core queue group (no persist)
 - run a durable job queue on JetStream workqueue (ack)
 
-This shard is not a Service adapter. It does not import HTTP WebSocket. Combine NATS and local Connections in the application if you need browser push.
+This shard is not a Service adapter. It does not import HTTP WebSocket. Combine NATS and local Connections in the application if you need browser push. See [Examples](#9-examples) and [WebSocket fan-out](#10-websocket-fan-out).
 
 See [ROADMAP.md](ROADMAP.md).
 
@@ -32,7 +32,9 @@ See [ROADMAP.md](ROADMAP.md).
 6. [Errors](#6-errors)
 7. [Security](#7-security)
 8. [Testing](#8-testing)
-9. [License](#9-license)
+9. [Examples](#9-examples)
+10. [WebSocket fan-out](#10-websocket-fan-out)
+11. [License](#11-license)
 
 ---
 
@@ -44,14 +46,14 @@ Add it to your `shard.yml`:
 dependencies:
   alumna:
     github: alumna/backend
-    version: ~> 0.9.0
+    version: ~> 0.9.1
   alumna-nats:
     github: alumna/nats
 ```
 
 Then run `shards install`.
 
-Needs Alumna Backend **0.9** or later.
+Needs Alumna Backend **0.9.1** or later (`after_commit` for WebSocket fan-out).
 
 Install a NATS server. The default URL is `nats://127.0.0.1:4222`. Core publish and subscribe need that server.
 
@@ -275,6 +277,51 @@ GitHub Actions:
 
 ---
 
-## 9. License
+## 9. Examples
+
+Teaching programs in `examples/`. They need a NATS server (`NATS_URL` or `nats://127.0.0.1:4222`). JetStream jobs need JetStream on that server.
+
+| File | What it shows |
+|---|---|
+| `examples/pubsub.cr` | Core publish and subscribe. Every current subscriber gets a copy. |
+| `examples/jobs.cr` | Core queue group, then a JetStream workqueue job (ack). |
+| `examples/websocket_fanout.cr` | `after_commit` publish → NATS subscribe → local `Connections.send_topic` |
+
+```bash
+crystal run examples/pubsub.cr
+crystal run examples/jobs.cr
+crystal run examples/websocket_fanout.cr
+```
+
+`websocket_fanout.cr` listens on port **3000**. Pass `--check` to run one create through NATS and confirm the WebSocket push, then exit.
+
+---
+
+## 10. WebSocket fan-out
+
+Alumna Backend holds sockets on **this process** (`App#connections`). This shard is the bus between processes. The application combines them. This shard does not import HTTP WebSocket. Backend does not import NATS.
+
+Use core `subscribe` with **no** queue group so every process that holds sockets gets a copy. Do not use JetStream workqueue for browser push. Workqueue is the job queue.
+
+The application owns subject names. A convention that matches mutation events:
+
+- Publish `messages.created`, `messages.updated`, `messages.patched`, `messages.removed`.
+- Subscribe `messages.>`.
+- Call `send_topic("messages", payload)` so one `watch("messages")` receives every mutation.
+- Encode JSON with `event`, `path`, and `result`. Do not use a request/reply `id` on a push.
+
+`watch` is not a WebSocket frame. A rule can call `connections.watch` with `ctx.store["connection_id"]` (for example on `find` when `ctx.provider` is `"websocket"`).
+
+Publish from `after_commit` with `on: :mutate`. Publish only. Do not also call `send_topic` in that rule if the same process subscribes, or local sockets can get the payload twice. `publish` is buffered: call `flush` when the process must send now.
+
+If `publish` or `flush` returns `Alumna::Nats::Error`, the example returns `nil` so the client still sees the write. You may return `ServiceError` instead. The write already happened.
+
+The subscribe handler must not raise. `send_topic` swallows `IO::Error` on one socket so others still get the payload. An uncaught raise in the handler goes to the NATS driver `on_error` (default no-op).
+
+See `examples/websocket_fanout.cr`.
+
+---
+
+## 11. License
 
 MIT

@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.1.0
 
 ### Added
-* Requires Alumna Backend `~> 0.9.0`.
+* Requires Alumna Backend `~> 0.9.1`.
+* Examples: core pub/sub, queue group and JetStream jobs, and WebSocket fan-out glue (`examples/`).
 * Driver `jgaskins/nats` 1.7.0.
 * `Alumna::Nats` connection holder. `new` (URI, URL string, or server list), `from_uri`, and `from_env`. Pass `nkeys_file` and `user_credentials`. `ping`, `flush`, and `close`. One `NATS::Client` per process.
 * `Alumna::Nats::Error` struct and `Errors.safe_message` / `Errors.wrap`. Messages never include URI userinfo. `ArgumentError` for a bad URL, a missing environment variable, an empty or invalid subject, or an empty queue group.
@@ -14,5 +15,8 @@
 * JetStream workqueue retention is the job queue. The first ack removes the message. A second consumer on the same interest returns `Alumna::Nats::Error`. Workers compete on one durable consumer.
 * Optional `ack_wait` on `create_consumer`. Deliver policy is all: a late consumer receives stored messages.
 * Specs for the closed delivery-model matrix: core fan-out (with one wildcard), core miss, core queue group, two queue groups, JetStream workqueue redelivery, JetStream durable fan-out on limits, and JetStream publish with no stream.
-* README: install, connect, pub/sub, queue group, JetStream jobs, errors, security, and testing.
+* README: install, connect, pub/sub, queue group, JetStream jobs, errors, security, testing, examples, and WebSocket fan-out.
 * GitHub CI: NATS 2.10 service with JetStream, `format --check`, `crystal spec`, `preview_mt` + `execution_context`, kcov 100% on `src/`.
+
+### Changed
+* **docs:** README documents examples and WebSocket fan-out composition (subscribe → local `Connections.send_topic`). Backend does not import NATS. This shard does not import HTTP WebSocket.
