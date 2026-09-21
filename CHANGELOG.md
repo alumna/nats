@@ -20,3 +20,4 @@
 
 ### Changed
 * **docs:** README documents examples and WebSocket fan-out composition (subscribe → local `Connections.send_topic`). Backend does not import NATS. This shard does not import HTTP WebSocket.
+* **docs:** README errors section uses tables for return types and `ArgumentError`.

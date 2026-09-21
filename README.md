@@ -239,11 +239,77 @@ Stream names must not be empty and must not contain `.`. A stream must have at l
 
 ## 6. Errors
 
-Operation results use the struct `Alumna::Nats::Error`. The message never includes URI userinfo (user and password).
+Two channels. Do not mix them.
 
-`new`, `from_uri`, and `from_env` return `Alumna::Nats | Alumna::Nats::Error`. `subscribe` returns `Alumna::Nats::Subscription | Alumna::Nats::Error`. `create_stream` returns `Alumna::Nats::JetStream::Stream | Alumna::Nats::Error`. `stream_info` returns `Alumna::Nats::JetStream::Stream | Nil | Alumna::Nats::Error`. `js.publish` returns `Alumna::Nats::JetStream::PubAck | Alumna::Nats::Error`. `create_consumer` returns `Alumna::Nats::JetStream::Consumer | Alumna::Nats::Error`. `consumer_info` returns `Alumna::Nats::JetStream::Consumer | Nil | Alumna::Nats::Error`. `js.subscribe` returns `Alumna::Nats::Subscription | Alumna::Nats::Error`. `publish`, `unsubscribe`, `delete_stream`, `delete_consumer`, `ack`, `nack`, `ping`, `flush`, and `close` return `Nil | Alumna::Nats::Error`.
+| Kind | Type | When |
+|---|---|---|
+| Operation | struct `Alumna::Nats::Error` | Driver or server failure. The process stays up. |
+| Config | `ArgumentError` (raise) | Empty name, bad URL, invalid subject. Fix the call. |
 
-Programmer and config mistakes raise `ArgumentError` (empty URL, bad scheme, missing environment variable, empty or invalid subject, empty queue group, empty stream name, stream name with `.`, empty stream subjects, empty consumer name, consumer name with `.`, empty deliver subject, empty deliver group, empty filter subject, empty JetStream ack subject, nack delay not greater than zero, ack wait not greater than zero, pull consumer on subscribe).
+`Error` is not an `Exception`. The message never includes URI userinfo (user and password).
+
+```crystal
+result = nats.publish("orders.created", payload)
+if result.is_a?(Alumna::Nats::Error)
+  # Handle the operation failure.
+end
+```
+
+In the tables below, `Error` is `Alumna::Nats::Error`. JetStream types are under `Alumna::Nats::JetStream`.
+
+### Return types
+
+**Connect**
+
+| Method | Type |
+|---|---|
+| `new`, `from_uri`, `from_env` | `Alumna::Nats \| Error` |
+
+**Core**
+
+| Method | Type |
+|---|---|
+| `subscribe` | `Subscription \| Error` |
+| `publish`, `unsubscribe`, `ping`, `flush`, `close` | `Nil \| Error` |
+
+**JetStream**
+
+| Method | Type |
+|---|---|
+| `create_stream` | `Stream \| Error` |
+| `stream_info` | `Stream \| Nil \| Error` |
+| `js.publish` | `PubAck \| Error` |
+| `create_consumer` | `Consumer \| Error` |
+| `consumer_info` | `Consumer \| Nil \| Error` |
+| `js.subscribe` | `Subscription \| Error` |
+| `delete_stream`, `delete_consumer`, `js.unsubscribe`, `ack`, `nack` | `Nil \| Error` |
+
+`stream_info` and `consumer_info` return `nil` when the name does not exist. `delete_stream` and `delete_consumer` of a missing name are a no-op. `js.publish` with no stream returns `Error`. The process stays up.
+
+### `ArgumentError`
+
+These calls raise. They do not return `Error`.
+
+| Mistake | Methods |
+|---|---|
+| Empty URL or empty server list | `new`, `from_uri` |
+| Scheme is not `nats://` or `tls://` | `new`, `from_uri`, `from_env` |
+| Missing or empty environment variable | `from_env` |
+| Empty subject | `publish`, `subscribe`, `js.publish`, `create_stream` |
+| Invalid subject (space, NUL; `*` or `>` on publish) | `publish`, `subscribe` |
+| Empty queue group | `subscribe` |
+| Empty stream name, or a name that contains `.` | stream and consumer helpers |
+| Empty stream subject list | `create_stream` |
+| Empty consumer name, or a name that contains `.` | consumer helpers |
+| Empty deliver subject, deliver group, or filter subject | `create_consumer` |
+| Pull consumer (no deliver subject) | `js.subscribe` |
+| Empty JetStream ack subject | `ack`, `nack` |
+| `nack` delay not greater than zero | `nack` |
+| `ack_wait` not greater than zero | `create_consumer` |
+
+### Subscribe handlers
+
+A return type cannot replace an exception in a subscribe handler. The handler must not raise. An uncaught raise goes to the NATS driver `on_error` (default no-op).
 
 ---
 
