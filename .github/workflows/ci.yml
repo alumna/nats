@@ -23,8 +23,14 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: crystal-lang/install-crystal@v1
+      - name: Force apt update
+        run: sudo -n apt-get update
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
         with:
           crystal: latest
       - run: crystal tool format --check
@@ -43,8 +49,14 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: crystal-lang/install-crystal@v1
+      - name: Force apt update
+        run: sudo -n apt-get update
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
         with:
           crystal: latest
       - uses: actions/cache@v6
@@ -79,11 +91,16 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v7
+      - name: Force apt update
+        run: sudo -n apt-get update
+
+      - name: Checkout code
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: crystal-lang/install-crystal@v1
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
         with:
           crystal: latest
 
