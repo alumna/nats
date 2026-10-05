@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.1.1
+
+### Changed
+* Requires Alumna Backend `>= 0.10.1`.
+
 ## v0.1.0
 
 ### Added
