@@ -5,8 +5,9 @@ class Alumna::Nats
   # Publish does not create a stream. Subscribe does not create a consumer.
   # The handler does not ack.
   # For a job queue, create the stream with `retention: :workqueue`.
+  # One helper for this client. Later calls return the same object.
   def jetstream : JetStream
-    JetStream.new(@client)
+    @jetstream ||= JetStream.new(@client)
   end
 
   class JetStream
@@ -112,11 +113,13 @@ class Alumna::Nats
       end
     end
 
-    # Inbound JetStream message. *body* is a view; copy it if you keep it after the handler returns.
+    # Inbound JetStream message.
+    # *payload* is the server text. It stays valid while you keep this value.
+    # *body* is a byte view of *payload*. Copy *body* if you keep the bytes and drop this value.
     # Pass the same value to `ack` or `nack`. The handler does not ack.
     struct Message
       getter subject : String
-      getter body : Bytes
+      getter payload : String
       getter stream : String
       getter consumer : String
       getter delivered_count : Int64
@@ -124,7 +127,7 @@ class Alumna::Nats
 
       def initialize(
         @subject : String,
-        @body : Bytes,
+        @payload : String,
         @stream : String,
         @consumer : String,
         @delivered_count : Int64,
@@ -132,8 +135,12 @@ class Alumna::Nats
       )
       end
 
+      def body : Bytes
+        @payload.to_slice
+      end
+
       def self.from_driver(raw : ::NATS::JetStream::Message) : self
-        new(raw.subject, raw.body, raw.stream, raw.consumer, raw.delivered_count, raw.reply_to)
+        new(raw.subject, raw.data_string, raw.stream, raw.consumer, raw.delivered_count, raw.reply_to)
       end
     end
 
@@ -280,8 +287,16 @@ class Alumna::Nats
     # *delay* waits before the next delivery.
     def nack(msg : Message, *, delay : Time::Span? = nil) : Nil | Alumna::Nats::Error
       check_reply_to!(msg)
-      payload = nack_payload(delay)
-      run { @client.publish(msg.reply_to, payload) }
+      if delay
+        raise ArgumentError.new("NATS nack delay must be greater than zero") if delay <= Time::Span.zero
+        # 14 byte prefix, at most 19 digits, one closing brace.
+        buf = uninitialized UInt8[40]
+        len = write_nack_delay(buf.to_unsafe, delay)
+        # `as(Nil)` fixes the block return type for this Slice argument.
+        run { @client.publish(msg.reply_to, Slice.new(buf.to_unsafe, len)).as(Nil) }
+      else
+        run { @client.publish(msg.reply_to, "-NAK") }
+      end
     end
 
     private def check_stream_name!(name : String) : Nil
@@ -317,13 +332,27 @@ class Alumna::Nats
       "_ALUMNA.JS.#{stream}.#{name}"
     end
 
-    private def nack_payload(delay : Time::Span?) : String
-      if delay
-        raise ArgumentError.new("NATS nack delay must be greater than zero") if delay <= Time::Span.zero
-        %(-NAK {"delay":#{delay.total_nanoseconds.to_i64}})
-      else
-        "-NAK"
+    private def write_nack_delay(buf : Pointer(UInt8), delay : Time::Span) : Int32
+      prefix = "-NAK {\"delay\":".to_slice
+      buf.copy_from(prefix.to_unsafe, prefix.size)
+      len = prefix.size
+      n = delay.total_nanoseconds.to_u64
+      digits = uninitialized UInt8[20]
+      count = 0
+      while n > 0
+        digits[count] = 48_u8 &+ (n % 10).to_u8
+        count &+= 1
+        n //= 10
       end
+      index = count
+      while index > 0
+        index &-= 1
+        buf[len] = digits[index]
+        len &+= 1
+      end
+      buf[len] = 125_u8
+      len &+= 1
+      len
     end
 
     private def check_stream_subjects!(subjects : Array(String)) : Nil

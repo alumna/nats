@@ -119,6 +119,17 @@ describe "Alumna::Nats JetStream consumer" do
     end
   end
 
+  it "sends a delayed nack as JSON nanoseconds" do
+    subject = unique_subject("nak-bytes")
+    incoming = Channel(String).new
+    sub = must_subscribe(SHARED, subject) { |msg| incoming.send(msg.payload) }
+    js = SHARED.jetstream
+    js.nack(fake_js_message(reply_to: subject), delay: 1.second).should be_nil
+    SHARED.flush
+    wait_nats(incoming).should eq(%(-NAK {"delay":1000000000}))
+    SHARED.unsubscribe(sub)
+  end
+
   it "waits before redelivery when nack has a delay" do
     stream = unique_stream_name("delay")
     name = unique_consumer_name("delay")

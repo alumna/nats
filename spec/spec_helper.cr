@@ -146,7 +146,7 @@ def fake_js_consumer(
 end
 
 def fake_js_message(*, reply_to : String = "x") : Alumna::Nats::JetStream::Message
-  Alumna::Nats::JetStream::Message.new("s", Bytes.empty, "st", "c", 1_i64, reply_to)
+  Alumna::Nats::JetStream::Message.new("s", "", "st", "c", 1_i64, reply_to)
 end
 
 def wait_stream_messages(

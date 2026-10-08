@@ -1,16 +1,24 @@
 require "uri"
 require "nats"
+require "sync"
 require "./nats/errors"
+require "./nats/payload"
 require "./nats/jetstream"
 
 # One NATS client for the process. Not a Service adapter.
 class Alumna::Nats
-  # Inbound core message. *body* is a view; copy it if you keep it after the handler returns.
+  # Inbound core message.
+  # *payload* is the server text. It stays valid while you keep this value.
+  # *body* is a byte view of *payload*. Copy *body* if you keep the bytes and drop this value.
   struct Message
     getter subject : String
-    getter body : Bytes
+    getter payload : String
 
-    def initialize(@subject : String, @body : Bytes)
+    def initialize(@subject : String, @payload : String)
+    end
+
+    def body : Bytes
+      @payload.to_slice
     end
   end
 
@@ -28,6 +36,12 @@ class Alumna::Nats
   end
 
   getter client : ::NATS::Client
+
+  # Encode buffer for `publish_json`. The lock covers encode and the driver write.
+  # Do not call `publish_json` from this client's disconnect handler. The lock is not reentrant.
+  @json_io = IO::Memory.new(128)
+  @json_mu = Sync::Mutex.new
+  @jetstream : JetStream? = nil
 
   # Open a client. *servers* is a URI, a URL string, or a list of servers.
   # Pass *nkeys_file* or *user_credentials* when the server requires them.
@@ -97,6 +111,21 @@ class Alumna::Nats
     run { @client.publish(subject, payload) }
   end
 
+  # Publish *data* as JSON. Does not wait for subscribers.
+  # `publish` keeps `String` and `Bytes` raw. This method encodes every value, including `String`.
+  # A non-finite float raises `ArgumentError`.
+  def publish_json(subject : String, data : Alumna::AnyData) : Nil | Error
+    check_subject!(subject)
+    @json_mu.lock
+    begin
+      @json_io.clear
+      write_payload(@json_io, data)
+      run { @client.publish(subject, @json_io.to_slice) }
+    ensure
+      @json_mu.unlock
+    end
+  end
+
   # Core subscribe. Does not block.
   # With no *queue_group*, each current subscriber gets a copy (fan-out).
   # With *queue_group*, subscribers in that group compete (one delivery per message).
@@ -107,7 +136,7 @@ class Alumna::Nats
     check_queue_group!(queue_group)
     run do
       handle = @client.subscribe(subject, queue_group: queue_group) do |raw, _sub|
-        block.call(Message.new(raw.subject, raw.body))
+        block.call(Message.new(raw.subject, raw.data_string))
       end
       Subscription.new(handle)
     end

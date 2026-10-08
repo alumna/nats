@@ -14,7 +14,8 @@ describe "Alumna::Nats core pub/sub" do
 
     msg = wait_nats(incoming)
     msg.subject.should eq(subject)
-    String.new(msg.body).should eq("hello")
+    msg.payload.should eq("hello")
+    String.new(msg.body).should eq(msg.payload)
 
     SHARED.unsubscribe(sub).should be_nil
   end
@@ -97,6 +98,47 @@ describe "Alumna::Nats core pub/sub" do
     SHARED.unsubscribe(sub)
   end
 
+  it "publish_json encodes AnyData and the subscriber gets that text" do
+    subject = unique_subject("json")
+    incoming = Channel(String).new
+    sub = must_subscribe(SHARED, subject) { |msg| incoming.send(msg.payload) }
+
+    data = sample_any
+    SHARED.publish_json(subject, data).should be_nil
+    SHARED.flush
+    wait_nats(incoming).should eq(Alumna::JsonHelper.to_string(data))
+
+    list = [] of Alumna::AnyData
+    list << 1_i64
+    list << nil
+    SHARED.publish_json(subject, list).should be_nil
+    SHARED.flush
+    wait_nats(incoming).should eq(Alumna::JsonHelper.to_string(list))
+
+    SHARED.publish_json(subject, "raw").should be_nil
+    SHARED.flush
+    wait_nats(incoming).should eq("\"raw\"")
+
+    big = "a" * 9000
+    SHARED.publish_json(subject, big).should be_nil
+    SHARED.flush
+    wait_nats(incoming).should eq(Alumna::JsonHelper.to_string(big))
+
+    SHARED.unsubscribe(sub)
+  end
+
+  it "raises ArgumentError for an empty subject or a non-finite JSON number" do
+    expect_raises(ArgumentError, "NATS subject must not be empty") do
+      SHARED.publish_json("", "x")
+    end
+    expect_raises(ArgumentError, "NATS JSON number must be finite") do
+      SHARED.publish_json("perf.json", Float64::NAN)
+    end
+    expect_raises(ArgumentError, "NATS JSON number must be finite") do
+      SHARED.publish_json("perf.json", Float64::INFINITY)
+    end
+  end
+
   it "raises ArgumentError for an empty subject on publish and subscribe" do
     expect_raises(ArgumentError, "NATS subject must not be empty") do
       SHARED.publish("", "x")
@@ -135,5 +177,28 @@ describe "Alumna::Nats core pub/sub" do
     holder.publish(subject, "nope").should be_a(Alumna::Nats::Error)
     holder.subscribe(subject) { }.should be_a(Alumna::Nats::Error)
     holder.unsubscribe(sub).should be_a(Alumna::Nats::Error)
+    holder.publish_json(subject, "x").should be_a(Alumna::Nats::Error)
   end
+end
+
+def sample_any : Hash(String, Alumna::AnyData)
+  inner = {} of String => Alumna::AnyData
+  inner["name"] = "a\"b\\c\b\f\n\r\t\u0001\u007f"
+  inner["n"] = 0_i64
+  inner["neg"] = -2_i64
+  inner["f"] = 1.5
+  inner["ok"] = true
+  inner["no"] = false
+  inner["empty"] = nil
+  inner["when"] = Time.utc(2026, 10, 7, 21, 0, 0)
+  inner["bin"] = Bytes[1, 2, 255]
+  list = [] of Alumna::AnyData
+  list << "v"
+  list << 2_i64
+  inner["list"] = list
+  blank = {} of String => Alumna::AnyData
+  inner["obj"] = blank
+  none = [] of Alumna::AnyData
+  inner["none"] = none
+  inner
 end

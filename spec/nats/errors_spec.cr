@@ -6,6 +6,21 @@ describe Alumna::Nats::Errors do
     Alumna::Nats::Errors.safe_message(Exception.new("")).should eq("NATS error")
   end
 
+  it "returns the same string when the message has no userinfo" do
+    msg = "connection refused"
+    ex = Exception.new(msg)
+    Alumna::Nats::Errors.safe_message(ex).should be(ex.message)
+
+    at = Exception.new("user@host timed out")
+    Alumna::Nats::Errors.safe_message(at).should be(at.message)
+
+    url = Exception.new("see http://example.com/a@b")
+    Alumna::Nats::Errors.safe_message(url).should be(url.message)
+
+    spaced = Exception.new("see http://foo bar@baz")
+    Alumna::Nats::Errors.safe_message(spaced).should be(spaced.message)
+  end
+
   it "strips URI userinfo from a message" do
     raw = Exception.new("failed nats://user:secret@127.0.0.1:4222 extra")
     safe = Alumna::Nats::Errors.safe_message(raw)
@@ -15,6 +30,12 @@ describe Alumna::Nats::Errors do
 
     tls = Exception.new("tls tls://:hunter2@nats.example.com:4222")
     Alumna::Nats::Errors.safe_message(tls).should eq("tls tls://nats.example.com:4222")
+
+    both = Exception.new("a nats://u:p@h b tls://x:y@z")
+    Alumna::Nats::Errors.safe_message(both).should eq("a nats://h b tls://z")
+
+    empty_user = Exception.new("failed nats://@host and http://example.com")
+    Alumna::Nats::Errors.safe_message(empty_user).should eq("failed nats://host and http://example.com")
   end
 
   it "wraps a driver exception as Alumna::Nats::Error" do

@@ -34,7 +34,7 @@ app = Alumna::App.new
 # Live fan-out between processes. No queue group: every process with sockets
 # gets a copy, including the writer. send_topic is an exact local string.
 sub = nats.subscribe("messages.>") do |msg|
-  app.connections.send_topic("messages", String.new(msg.body))
+  app.connections.send_topic("messages", msg.payload)
 end
 if sub.is_a?(Alumna::Nats::Error)
   abort "subscribe failed: #{sub.message}"
@@ -81,10 +81,9 @@ app.after_commit on: :mutate do |ctx|
   payload["event"] = event
   payload["path"] = ctx.path
   payload["result"] = result
-  json = Alumna::JsonHelper.to_string(payload)
 
   # Ignore bus Error so the client still sees the write.
-  nats.publish("messages.#{event}", json)
+  nats.publish_json("messages.#{event}", payload)
   nats.flush
   nil
 end
