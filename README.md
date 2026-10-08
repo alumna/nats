@@ -46,7 +46,6 @@ Add it to your `shard.yml`:
 dependencies:
   alumna:
     github: alumna/backend
-    version: ~> 0.9.1
   alumna-nats:
     github: alumna/nats
 ```
