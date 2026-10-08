@@ -126,11 +126,11 @@ Use one `Alumna::Nats` per process. Do not open a client per request.
 
 ## 3. Publish and subscribe
 
-The application owns the subject name. There is no required prefix. Payload is `String` or `Bytes`.
+The application owns the subject name. There is no required prefix. Payload is `String` or `Bytes`. See [Efficient use](#efficient-use) for `publish`, `publish_json`, and `payload`.
 
 ```crystal
 sub = nats.subscribe("orders.created") do |msg|
-  body = String.new(msg.body)
+  body = msg.payload
 end
 if sub.is_a?(Alumna::Nats::Error)
   # Handle the subscribe failure.
@@ -143,7 +143,35 @@ end
 
 `subscribe` does not block. It returns `Alumna::Nats::Subscription` or `Alumna::Nats::Error`. Pass the handle to `unsubscribe`.
 
-`msg.body` is a view. Copy the bytes if you keep them after the handler returns.
+### Efficient use
+
+`publish` sends a `String` or `Bytes` unchanged. Use it for text that is already encoded, including a JSON string you already built.
+
+`publish_json` encodes `AnyData` into a reused buffer and publishes those bytes. A hash or a list does not allocate a JSON string on each call. Use it for a hash, an array, a number, a bool, a time, or nil.
+
+```crystal
+order = {} of String => Alumna::AnyData
+order["id"] = 1_i64
+nats.publish_json("orders.created", order)
+```
+
+A `String` passed to `publish_json` is encoded as a JSON string. The server text has quotes and escapes. JSON text you already have goes to `publish`.
+
+In the handler, read `msg.payload`. That string is the server text. It stays valid for as long as you keep it.
+
+```crystal
+nats.subscribe("orders.created") do |msg|
+  data = Alumna::JsonHelper.from_string(msg.payload)
+end
+```
+
+`msg.body` is a byte view of `payload`. Copy `body` when you store the bytes and discard the message. `String.new(msg.body)` copies the whole payload. Use `payload` instead.
+
+`nats.jetstream` returns the same helper for that client on every call. Keep that value next to the client.
+
+`publish` and `publish_json` stay in the client buffer until `flush`. After a burst, call `flush` once.
+
+Do not call `publish_json` from this client's disconnect handler. The encode lock is not reentrant.
 
 Each current subscriber on a subject gets a copy of the message. If no subscriber is connected, the server does not keep the message. This is not a durable job queue.
 
@@ -163,7 +191,7 @@ A queue group makes subscribers compete. Each message goes to one subscriber in 
 
 ```crystal
 sub = nats.subscribe("jobs.email", queue_group: "workers") do |msg|
-  body = String.new(msg.body)
+  body = msg.payload
 end
 ```
 
@@ -199,7 +227,7 @@ else
     # Handle the create failure.
   else
     sub = js.subscribe(consumer) do |msg|
-      body = String.new(msg.body)
+      body = msg.payload
       js.ack(msg)
       # or: js.nack(msg)
       # or: js.nack(msg, delay: 1.second)
@@ -227,7 +255,7 @@ Default storage is file. Pass `storage: :memory` for an in-memory stream. Option
 
 `consumer_info` returns the consumer, `nil` if the consumer does not exist, or `Alumna::Nats::Error`. `delete_consumer` removes the consumer. If the consumer does not exist, `delete_consumer` is a no-op.
 
-`js.subscribe` does not block. It returns `Alumna::Nats::Subscription` or `Alumna::Nats::Error`. It does not create a consumer. It does not ack when the handler returns. You call `ack` or `nack`. `nack` with `delay:` waits before the next delivery. `msg.body` is a view. Copy the bytes if you keep them after the handler returns.
+`js.subscribe` does not block. It returns `Alumna::Nats::Subscription` or `Alumna::Nats::Error`. It does not create a consumer. It does not ack when the handler returns. You call `ack` or `nack`. `nack` with `delay:` waits before the next delivery. Read `msg.payload`, same as core. See [Efficient use](#efficient-use).
 
 This product uses push consumers. A consumer without a deliver subject raises `ArgumentError`.
 
@@ -270,7 +298,7 @@ In the tables below, `Error` is `Alumna::Nats::Error`. JetStream types are under
 | Method | Type |
 |---|---|
 | `subscribe` | `Subscription \| Error` |
-| `publish`, `unsubscribe`, `ping`, `flush`, `close` | `Nil \| Error` |
+| `publish`, `publish_json`, `unsubscribe`, `ping`, `flush`, `close` | `Nil \| Error` |
 
 **JetStream**
 
@@ -295,7 +323,8 @@ These calls raise. They do not return `Error`.
 | Empty URL or empty server list | `new`, `from_uri` |
 | Scheme is not `nats://` or `tls://` | `new`, `from_uri`, `from_env` |
 | Missing or empty environment variable | `from_env` |
-| Empty subject | `publish`, `subscribe`, `js.publish`, `create_stream` |
+| Empty subject | `publish`, `publish_json`, `subscribe`, `js.publish`, `create_stream` |
+| JSON number is not finite | `publish_json` |
 | Invalid subject (space, NUL; `*` or `>` on publish) | `publish`, `subscribe` |
 | Empty queue group | `subscribe` |
 | Empty stream name, or a name that contains `.` | stream and consumer helpers |
@@ -373,12 +402,12 @@ The application owns subject names. A convention that matches mutation events:
 
 - Publish `messages.created`, `messages.updated`, `messages.patched`, `messages.removed`.
 - Subscribe `messages.>`.
-- Call `send_topic("messages", payload)` so one `watch("messages")` receives every mutation.
+- Call `send_topic("messages", msg.payload)` so one `watch("messages")` receives every mutation. `payload` is the server text. No extra copy.
 - Encode JSON with `event`, `path`, and `result`. Do not use a request/reply `id` on a push.
 
 `watch` is not a WebSocket frame. A rule can call `connections.watch` with `ctx.store["connection_id"]` (for example on `find` when `ctx.provider` is `"websocket"`).
 
-Publish from `after_commit` with `on: :mutate`. Publish only. Do not also call `send_topic` in that rule if the same process subscribes, or local sockets can get the payload twice. `publish` is buffered: call `flush` when the process must send now.
+Publish from `after_commit` with `on: :mutate`. Use `publish_json` for the `{event, path, result}` object. Publish only. Do not also call `send_topic` in that rule if the same process subscribes, or local sockets can get the payload twice. `publish` and `publish_json` are buffered: call `flush` when the process must send now.
 
 If `publish` or `flush` returns `Alumna::Nats::Error`, the example returns `nil` so the client still sees the write. You may return `ServiceError` instead. The write already happened.
 

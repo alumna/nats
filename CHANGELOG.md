@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+* `Message#payload` and `JetStream::Message#payload` return the server text. `body` is a byte view of that text.
+* `publish_json` encodes `AnyData` as JSON.
+
+### Changed
+* `jetstream` returns the same helper for one client.
+* `nack` with `delay` writes the payload into a stack buffer.
+* `Errors.safe_message` returns the original message when it has no URI userinfo.
+
 ## v0.1.1
 
 ### Changed

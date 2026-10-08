@@ -8,7 +8,7 @@ Driver: `jgaskins/nats`. One `NATS::Client` per process. URI, URL string, or a l
 
 * `Alumna::Nats` connection holder: `new` / `from_uri` / `from_env`, `ping`, `flush`, `close`.
 * Error helper strips URI userinfo. Operation errors are the struct `Alumna::Nats::Error`. Config errors raise `ArgumentError`.
-* Core publish and subscribe. Payload `String` or `Bytes`. App owns subjects. `subscribe` does not block.
+* Core publish and subscribe. Payload `String` or `Bytes`. `publish_json` encodes `AnyData`. App owns subjects. `subscribe` does not block.
 * Core queue group on subscribe. Competing consumers. No persist.
 * JetStream stream helper: create, info, delete. Publish does not create a stream.
 * JetStream durable push consumer, subscribe, explicit ack and nack. The handler does not ack.

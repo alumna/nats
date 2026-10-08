@@ -16,12 +16,12 @@ at_exit { nats.close }
 got_a = Channel(String).new
 got_b = Channel(String).new
 
-sub_a = nats.subscribe("orders.created") { |msg| got_a.send(String.new(msg.body)) }
+sub_a = nats.subscribe("orders.created") { |msg| got_a.send(msg.payload) }
 if sub_a.is_a?(Alumna::Nats::Error)
   abort "subscribe failed: #{sub_a.message}"
 end
 
-sub_b = nats.subscribe("orders.created") { |msg| got_b.send(String.new(msg.body)) }
+sub_b = nats.subscribe("orders.created") { |msg| got_b.send(msg.payload) }
 if sub_b.is_a?(Alumna::Nats::Error)
   abort "subscribe failed: #{sub_b.message}"
 end

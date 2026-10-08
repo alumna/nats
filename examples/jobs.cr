@@ -29,13 +29,13 @@ end
 
 queue_got = Channel(String).new
 sub_a = nats.subscribe("example.queue.email", queue_group: "workers") do |msg|
-  queue_got.send("A:#{String.new(msg.body)}")
+  queue_got.send("A:#{msg.payload}")
 end
 if sub_a.is_a?(Alumna::Nats::Error)
   abort "queue subscribe A failed: #{sub_a.message}"
 end
 sub_b = nats.subscribe("example.queue.email", queue_group: "workers") do |msg|
-  queue_got.send("B:#{String.new(msg.body)}")
+  queue_got.send("B:#{msg.payload}")
 end
 if sub_b.is_a?(Alumna::Nats::Error)
   abort "queue subscribe B failed: #{sub_b.message}"
@@ -80,7 +80,7 @@ end
 
 job_got = Channel(String).new
 sub = js.subscribe(cons) do |msg|
-  body = String.new(msg.body)
+  body = msg.payload
   job_got.send(body)
   js.ack(msg)
 end

@@ -147,4 +147,8 @@ describe Alumna::Nats do
   it "pings the shared holder" do
     SHARED.ping.should be_nil
   end
+
+  it "returns the same JetStream helper for one client" do
+    SHARED.jetstream.should be(SHARED.jetstream)
+  end
 end
