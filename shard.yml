@@ -1,10 +1,9 @@
 name: alumna-nats
-version: 0.1.1
+version: 0.2.0
 
 dependencies:
   alumna:
     github: alumna/backend
-    version: ">= 0.10.1"
   nats:
     github: jgaskins/nats
     # shard.yml version 1.7.0 on main; GitHub has no v1.7.0 tag yet

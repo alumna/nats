@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 - 2026-10-07
 
 ### Added
 * `Message#payload` and `JetStream::Message#payload` return the server text. `body` is a byte view of that text.
@@ -11,7 +11,7 @@
 * `nack` with `delay` writes the payload into a stack buffer.
 * `Errors.safe_message` returns the original message when it has no URI userinfo.
 
-## v0.1.1
+## v0.1.1 - 2026-10-05
 
 ### Changed
 * Requires Alumna Backend `>= 0.10.1`.
